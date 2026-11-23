@@ -13,6 +13,7 @@ import {
   processFolders,
   startsOf,
   resolvePath,
+  usesIn,
   utf8Length,
   wholeLines,
   worktreeAdds,
@@ -34,21 +35,21 @@ test('worktreeAdds finds the folder git runs in and the path word', async () => 
 
 test('a for loop over listed words is read once per word', async () => {
   const loop =
-    'for r in agentx-next guardian; do cd ~/Development/Codenotary/$r || exit 1; echo "== $r"; ' +
-    'git worktree add -q -b feat/autosec-containers .claude/worktrees/autosec-containers origin/main && ' +
-    'git -C .claude/worktrees/autosec-containers log --oneline -1; done'
+    'for r in app api; do cd ~/src/$r || exit 1; echo "== $r"; ' +
+    'git worktree add -q -b feat/x .claude/worktrees/x origin/main && ' +
+    'git -C .claude/worktrees/x log --oneline -1; done'
   expect(worktreeAdds(loop)).toEqual([
-    { dir: '~/Development/Codenotary/agentx-next', path: '.claude/worktrees/autosec-containers' },
-    { dir: '~/Development/Codenotary/guardian', path: '.claude/worktrees/autosec-containers' },
+    { dir: '~/src/app', path: '.claude/worktrees/x' },
+    { dir: '~/src/api', path: '.claude/worktrees/x' },
   ])
   expect(branchesMade(loop)).toEqual([
     {
-      dir: '~/Development/Codenotary/agentx-next/.claude/worktrees/autosec-containers',
-      branch: 'feat/autosec-containers',
+      dir: '~/src/app/.claude/worktrees/x',
+      branch: 'feat/x',
     },
     {
-      dir: '~/Development/Codenotary/guardian/.claude/worktrees/autosec-containers',
-      branch: 'feat/autosec-containers',
+      dir: '~/src/api/.claude/worktrees/x',
+      branch: 'feat/x',
     },
   ])
   expect(worktreeAdds('for r in one\ndo\n  git -C "/x/${r}" worktree add y\ndone')).toEqual([
@@ -247,21 +248,34 @@ test('branchesMade finds branches a command creates and where', async () => {
 test('a Bash command resolves against the previous line folder, since its own line can hold where it moved', async () => {
   const add = 'git worktree add -b x .claude/worktrees/x'
   const lines = [
-    JSON.stringify({ type: 'user', cwd: '/agentx', message: { content: [{ type: 'tool_result' }] } }),
+    JSON.stringify({ type: 'user', cwd: '/app', message: { content: [{ type: 'tool_result' }] } }),
     JSON.stringify({
       type: 'assistant',
-      cwd: '/guardian',
-      message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: `${add}; cd /guardian && ${add}` } }] },
+      cwd: '/api',
+      message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: `${add}; cd /api && ${add}` } }] },
     }),
   ]
   const { kept, shell } = keptLines(lines)
-  expect(shell).toBe('/guardian')
-  expect(madeIn(kept, '/h').map(one => one.path)).toEqual([
-    '/agentx/.claude/worktrees/x',
-    '/guardian/.claude/worktrees/x',
-  ])
-  expect(branchesIn(kept, '/h').map(one => one.dir)).toEqual([
-    '/agentx/.claude/worktrees/x',
-    '/guardian/.claude/worktrees/x',
-  ])
+  expect(shell).toBe('/api')
+  expect(madeIn(kept, '/h').map(one => one.path)).toEqual(['/app/.claude/worktrees/x', '/api/.claude/worktrees/x'])
+  expect(branchesIn(kept, '/h').map(one => one.dir)).toEqual(['/app/.claude/worktrees/x', '/api/.claude/worktrees/x'])
+})
+
+test('a tool call is work in a worktree when it runs inside it or names it in its input', () => {
+  const A = '/r/.claude/worktrees/a'
+  const B = '/r/.claude/worktrees/a-1'
+  const line = (cwd: string, timestamp: string, content: unknown[]) =>
+    JSON.stringify({ type: 'assistant', cwd, timestamp, message: { content } })
+  const bash = (command: string) => ({ type: 'tool_use', name: 'Bash', input: { command } })
+  const lines = [
+    line(`${A}/src`, '2026-11-01T10:00:00.000Z', [bash('ls')]),
+    line('/r', '2026-11-02T10:00:00.000Z', [bash(`git -C ${B} status`)]),
+    line('/r', '2026-11-03T10:00:00.000Z', [{ type: 'tool_result', content: `${A} [main]` }]),
+    line('/r', '2026-11-04T10:00:00.000Z', [{ type: 'text', text: `see ${A}` }, bash('ls')]),
+  ]
+
+  expect(usesIn(lines, [A, B])).toEqual({
+    [A]: Date.parse('2026-11-01T10:00:00.000Z'),
+    [B]: Date.parse('2026-11-02T10:00:00.000Z'),
+  })
 })

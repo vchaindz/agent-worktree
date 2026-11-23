@@ -1,26 +1,52 @@
 import type { EngineInterface } from 'claude-code'
 
-import { branchesIn, jsonOf, keptLines, madeIn, timeOf, wholeLines } from './detect'
+import { branchesIn, jsonOf, keptLines, madeIn, timeOf, usesIn, utf8Length, wholeLines } from './detect'
 import type { Found, Kept, Made } from './detect'
 
 // under the 4 MiB read cap, with room for a character cut at either edge
 const RANGE = 4 * 1024 * 1024 - 64
 
-// a line longer than one range is skipped
-async function madeLines($: EngineInterface, path: string) {
+// when the session last worked in each worktree, from its transcript read up to usedEnd
+const usedAt: Record<string, number> = {}
+let usedEnd: number | undefined
+
+// a line longer than one range is skipped; the session's own transcript is also read for uses of the watched paths
+async function madeLines($: EngineInterface, path: string, watched?: Set<string>, home = '') {
   const { size } = await $.fs.stat(path)
   const lines: Kept[] = []
   let shell: string | undefined
   for (let offset = 0; offset < size; ) {
     const isLast = offset + RANGE >= size
-    const range = wholeLines(await $.fs.read(path, { offset, length: RANGE }), isLast)
+    const text = await $.fs.read(path, { offset, length: RANGE })
+    const range = wholeLines(text, isLast)
     const next = keptLines(range.lines, shell)
     lines.push(...next.kept)
     shell = next.shell
+    if (watched) {
+      for (const one of madeIn(next.kept, home)) watched.add(one.path)
+      usesIn(range.lines, [...watched], usedAt)
+      // a last line still being written is read again on the next refresh
+      if (isLast) usedEnd = offset + utf8Length(text.slice(0, text.lastIndexOf('\n') + 1))
+    }
     offset += isLast ? RANGE : range.bytes || RANGE
   }
 
   return lines
+}
+
+// when the session last worked in each of these paths, reading on from where its transcript was left
+export async function lastUses($: EngineInterface, paths: string[]) {
+  const { transcriptPath } = await $.session.info()
+  const { size } = await $.fs.stat(transcriptPath)
+  if (usedEnd === undefined || size < usedEnd) usedEnd = size
+  while (usedEnd < size) {
+    const range = wholeLines(await $.fs.read(transcriptPath, { offset: usedEnd, length: RANGE }), false)
+    if (range.bytes === 0 && size - usedEnd < RANGE) break
+    usesIn(range.lines, paths, usedAt)
+    usedEnd += range.bytes || RANGE
+  }
+
+  return usedAt
 }
 
 // subagents' transcripts, and those of the agents their workflows ran
@@ -43,9 +69,9 @@ async function isMadeThen($: EngineInterface, one: Found) {
   return !!stat && one.at !== undefined && stat.mtimeMs >= one.at - 60_000
 }
 
-async function madeInFile($: EngineInterface, file: string, home: string, isMain: boolean) {
-  const lines = await madeLines($, file)
-  const agentId = isMain ? undefined : /agent-([^/]+)\.jsonl$/.exec(file)?.[1]
+async function madeInFile($: EngineInterface, file: string, home: string, watched?: Set<string>) {
+  const lines = await madeLines($, file, watched, home)
+  const agentId = watched ? undefined : /agent-([^/]+)\.jsonl$/.exec(file)?.[1]
   if (!agentId) return { worktrees: madeIn(lines, home), branches: branchesIn(lines, home) }
   const meta = jsonOf<Record<string, unknown>>(await $.fs.read(file.replace(/\.jsonl$/, '.meta.json')).catch(() => ''))
   const who = { agentId, label: typeof meta?.description === 'string' ? meta.description : agentId }
@@ -65,12 +91,21 @@ async function madeInFile($: EngineInterface, file: string, home: string, isMain
 }
 
 // worktrees and branches the session and its subagents made before the plugin loaded, from their transcripts
-export async function madeBefore($: EngineInterface): Promise<{ worktrees: Found[]; branches: Made[] }> {
+export async function madeBefore(
+  $: EngineInterface,
+  known: string[],
+): Promise<{ worktrees: Found[]; branches: Made[] }> {
   const { transcriptPath } = await $.session.info()
   const home = (await $.env.get('HOME')) ?? ''
-  const files = [transcriptPath, ...(await transcriptsIn($, `${transcriptPath.replace(/\.jsonl$/, '')}/subagents`))]
+  // subagents first, so the worktrees they made are watched for uses in the session's own transcript
+  const files = [...(await transcriptsIn($, `${transcriptPath.replace(/\.jsonl$/, '')}/subagents`)), transcriptPath]
+  const watched = new Set(known)
   const read = []
-  for (const file of files) read.push(await madeInFile($, file, home, file === transcriptPath).catch(() => undefined))
+  for (const file of files) {
+    const one = await madeInFile($, file, home, file === transcriptPath ? watched : undefined).catch(() => undefined)
+    for (const made of one?.worktrees ?? []) watched.add(made.path)
+    read.push(one)
+  }
   const worktrees = read.flatMap(one => one?.worktrees ?? [])
   const kept = await Promise.all(worktrees.map(async one => ((await isMadeThen($, one)) ? [one] : [])))
 

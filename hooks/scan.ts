@@ -4,7 +4,7 @@ import type { AgentInfo, EngineInterface } from 'claude-code'
 import type { AgentBadge, FileChange, Problem, Pull, Row, Snap, Tracked } from '../types'
 import { deepest, isInside, jsonOf, parseLock, parseWorktreeList, processFolders, startsOf } from './detect'
 import type { Listed, Made } from './detect'
-import { madeBefore } from './history'
+import { lastUses, madeBefore } from './history'
 
 export const PANE = 'agent-worktree'
 export const ACTIVE = ['pending', 'running', 'waiting']
@@ -17,8 +17,8 @@ const tracked = atom({ plugin: 'agent-worktree', key: 'tracked' } as const, [], 
 })
 const grove = atom(
   { plugin: 'agent-worktree', key: 'grove' } as const,
-  { repoOf: {}, others: [], rowsAt: 0, snaps: {}, agents: {} },
-  { shape: 'grove-8' },
+  { repoOf: {}, others: [], rowsAt: 0, snaps: {}, agents: {}, usedAt: {} },
+  { shape: 'grove-9' },
 )
 const pulls = atom(
   { plugin: 'agent-worktree', key: 'pulls' } as const,
@@ -275,7 +275,8 @@ export function refresh($: EngineInterface, isFull = false) {
 }
 
 async function refreshNow($: EngineInterface, isFull: boolean) {
-  const history = isHistoryRead ? undefined : await madeBefore($).catch(() => undefined)
+  const known = liveTracked(await read($, tracked)).map(one => one.path)
+  const history = isHistoryRead ? undefined : await madeBefore($, known).catch(() => undefined)
   isHistoryRead = true
   if (history) madeBranches.push(...history.branches)
   const found = history?.worktrees ?? []
@@ -402,6 +403,11 @@ async function refreshNow($: EngineInterface, isFull: boolean) {
     )
   const ownPaths = live.filter(one => !gone.includes(one)).map(one => one.path)
   const livePaths = live.map(one => one.path)
+  const used = await lastUses($, livePaths).catch(() => ({}) as Record<string, number>)
+  // the worktree the session is in counts as worked in now
+  const usedAt = Object.fromEntries(
+    livePaths.map(path => [path, isInside(sessionDir, path) ? now : (used[path] ?? 0)] as const),
+  )
   const badgePaths = [...new Set([...paths, ...livePaths])]
   const badges: Record<string, AgentBadge> = {}
   for (const agent of [...agents].sort((a, b) => a.startTime - b.startTime)) {
@@ -466,6 +472,7 @@ async function refreshNow($: EngineInterface, isFull: boolean) {
     rowsAt: isStale ? now : previous.rowsAt,
     snaps: { ...snaps, ...Object.fromEntries(tiles) },
     agents: Object.fromEntries(Object.entries(badges).filter(([path]) => ownPaths.includes(path))),
+    usedAt,
   }))
   // PR rows are only drawn in the pane, so GitHub is asked once a minute only while it is open
   const isPullsStale = isPaneSeen && now - (await read($, pulls)).at >= ROWS_EVERY

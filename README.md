@@ -36,6 +36,10 @@ THIS SESSION  2 worktrees                                        Refresh
 │ side  ↑1 ↓0 main · clean                                     │
 ╰──────────────────────────────────────────────────────────────╯
 
+EARLIER IN THIS SESSION  1 worktree not used in the last day
+  ⎇ cache-spike  spike/cache  PR #41 merged      12 d
+    1 uncommitted file
+
 PROBLEMS IN THIS SESSION  1 failed worktree call
 ✗ 14:05  subagent «fix auth»  add ../tmp-x  invalid reference: .
 
@@ -49,10 +53,13 @@ OTHER WORKTREES IN app  3 in 1 repository
 
   Can be removed · 1
     ● old-spike    spike/cache         PR #41 merged     98 d
+
+REMOVED  1 worktree this session made
+  ⎇ try-cache  PR #48 merged  made by this session at 11:20 · git worktree add
 ```
 
 Each of this session's worktrees is a framed card: accent border for the one
-the session is in, green while its agent runs, dim once removed. Numbers are
+the session is in, green while its agent runs. Numbers are
 coloured (`↑` green, `↓` and `dirty` yellow, `+` green, `−` red), the bar shows
 lines added and removed scaled across all cards, and the sparkline traces the
 agent's token use over its last 16 readings. Below 60 columns a card drops the
@@ -66,11 +73,16 @@ bar, last commit and sparkline, and shortens its buttons.
   this session's process; one an agent works in is claimed for the session. Each
   card says who made it and when, and lists the PRs your `gh` account opened
   from the branches made in its worktree or checked out there now
-  (`PR #180 merged · title`, newest first, five at most), read from GitHub once
+  (`PR #180 merged · title`, the newest three, the rest under `+N more PRs`), read from GitHub once
   a minute while the pane is open; when `gh` cannot answer, the card says
-  `PR unknown`. The newest worktree comes first; one the session removed stays, marked
-  `removed`. A worktree stays here after its agent ends. The worktree the
-  session is in is marked `★ here`.
+  `PR unknown`. The newest worktree comes first. A worktree stays here after its
+  agent ends. The worktree the session is in is marked `★ here`.
+- **Earlier in this session**: this session's worktrees it has not made or
+  worked in for a day, one row each: the branch, its newest PR and the days
+  since the session last worked there. A tool call counts as work in a worktree
+  when it runs inside it or names its folder in its input; the worktree the
+  session is in, and one its agent runs in, stay above. Press a row to open its
+  card under it.
 - **Problems in this session**: one line per failed worktree call (a refused
   `EnterWorktree`, a `git worktree add` that failed), the last five.
 - **Other worktrees**: the rest of the worktrees of the same repositories,
@@ -91,6 +103,9 @@ bar, last commit and sparkline, and shortens its buttons.
   files, the diff bar, the last commit, every PR from its branch, and the
   `Investigate`, `Review diff`, `Cleanup check` and `Files` buttons; an open
   tile is read every 5 seconds. Press the row again to close it.
+- **Removed**: this session's worktrees whose folders are gone, at the bottom
+  of the pane, one line each: the PR as last read before removal (an open one by
+  its number alone, since it is not read again) and who made it and when.
 - **Each card**: branch, commits ahead and behind the main worktree's branch,
   uncommitted file count, diff size, last commit and its age.
 - **Live agent**: the agent working in the worktree, matched by its directory:

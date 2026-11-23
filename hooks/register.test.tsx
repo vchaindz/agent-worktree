@@ -58,6 +58,7 @@ const AGENT_WT = { path: '/repo/.claude/worktrees/agent-1', branch: 'worktree-ag
 type World = {
   repos: Record<string, Wt[]>
   cwd: string
+  now: number
   agents: never[]
   per: Record<string, Partial<Answers>>
   pid?: { pid: number; start: string }
@@ -129,6 +130,7 @@ const world = (on: On, repos: Record<string, Wt[]>, cwd = '/repo'): World => {
   const w: World = {
     repos,
     cwd,
+    now: NOW,
     agents: [],
     per: {},
     gone: new Set(),
@@ -148,7 +150,7 @@ const world = (on: On, repos: Record<string, Wt[]>, cwd = '/repo'): World => {
   on('session.cwd', () => ({ value: w.cwd }))
   on('env.get', () => ({ value: '/home/u' }))
   on('clock.after', () => new Promise<never>(() => {}))
-  on('clock.now', () => ({ value: NOW }))
+  on('clock.now', () => ({ value: w.now }))
   on('ui.status', (_, e) => {
     w.status.push(e.text)
 
@@ -340,9 +342,8 @@ test('an agent and ExitWorktree', async ($, on) => {
   const found = await texts($)
   expect(found).toContain(`made by subagent «fix auth» at ${AT}`)
   expect(found.find(one => one.startsWith('◆ agent-1'))).not.toContain('running')
-  const exited = found.find(one => one.startsWith('⎇ fix-auth'))
-  expect(exited).toContain('removed')
-  expect(exited).not.toContain('★ here')
+  expect(found.some(one => one.startsWith('⎇ fix-auth'))).toBe(false)
+  expect(found).toContain(`  ⎇ fix-auth  made by this session at ${AT} · EnterWorktree`)
 })
 
 test('a background agent gets its worktree by id, live badge, View, and a done toast', async ($, on) => {
@@ -928,10 +929,15 @@ test('a worktree removed with git shows as removed and leaves the counts', async
     return { result: { stdout: '', stderr: '', interrupted: false } as never }
   })
   await start($)
+  w.pulls = { side: [{ number: 3, state: 'MERGED', title: 'Side' }] }
   await $.tool.call({ tool: 'Bash', command: 'git worktree add .claude/worktrees/side -b side' })
+  await texts($)
   await $.tool.call({ tool: 'Bash', command: 'git worktree remove .claude/worktrees/side' })
 
-  expect(await texts($)).toContain('⎇ side  removed')
+  const found = await texts($)
+  expect(found).toContain('No worktrees left; the removed ones are below.')
+  expect(found[found.indexOf('REMOVED  1 worktree this session made') - 1]).toBe(' ')
+  expect(found.at(-1)).toBe(`  ⎇ side  PR #3 merged  made by this session at ${AT} · git worktree add`)
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect(await band.find({ type: 'Text', text: /worktree/ })).toBeUndefined()
   await band.unmount()
@@ -1161,7 +1167,7 @@ test('a card lists the PRs of the branches made in its worktree, newest first', 
   ])
 })
 
-test('a card shows five PRs, and its more-PRs button shows the rest', async ($, on) => {
+test('a card shows its three newest PRs, and its more-PRs button shows the rest', async ($, on) => {
   const W = { path: '/repo/.claude/worktrees/setup', branch: 'b6' }
   const w = world(on, { '/repo': [MAIN, W] })
   enters(on, W)
@@ -1180,13 +1186,13 @@ test('a card shows five PRs, and its more-PRs button shows the rest', async ($, 
   const rows = async () =>
     (await ui.findAll({ type: 'Text' })).filter(one => one.text.startsWith('PR #') && one.text.includes(' · '))
   const more = async () => (await ui.find({ type: 'Button', key: `${W.path}:pulls` }))?.text
-  expect(await rows()).toHaveLength(5)
-  expect(await more()).toBe('+2 more PRs')
+  expect((await rows()).map(one => one.text.split(' · ')[0])).toEqual(['PR #7 merged', 'PR #6 merged', 'PR #5 merged'])
+  expect(await more()).toBe('+4 more PRs')
   await ui.press({ key: `${W.path}:pulls` })
   expect(await rows()).toHaveLength(7)
   expect(await more()).toBe('Fewer PRs')
   await ui.press({ key: `${W.path}:pulls` })
-  expect(await rows()).toHaveLength(5)
+  expect(await rows()).toHaveLength(3)
   await ui.unmount()
 })
 
@@ -1271,7 +1277,8 @@ test('a card keeps PRs only of its branches opened by this gh account, and keeps
 
   w.gone.add(W.path)
   await texts($)
-  expect(await rows()).toEqual(['PR #180 open · Mine'])
+  expect(await rows()).toEqual([])
+  expect((await texts($)).at(-1)).toMatch(/^  ⎇ setup  PR #180  made by this session at .+ · git worktree add$/)
 })
 
 test('a branch made by Bash after the plugin loaded counts for its worktree', async ($, on) => {
@@ -1617,4 +1624,54 @@ test('worktrees a Bash loop made before the plugin loaded are found in the trans
   expect(
     found.filter(one => one.startsWith('made by this session at ') && one.endsWith(' · git worktree add')).length,
   ).toBe(2)
+})
+
+test('a worktree the session has not worked in for a day is a row under EARLIER, and opens its card', async ($, on) => {
+  const OLD = { path: '/repo/.claude/worktrees/old', branch: 'old' }
+  const NEW = { path: '/repo/.claude/worktrees/new', branch: 'new' }
+  const w = world(on, { '/repo': [MAIN, OLD, NEW] })
+  w.now = Date.parse('2026-11-20T10:00:00.000Z')
+  w.files['/t/s.jsonl'] = [
+    bashLine('/repo', '2026-11-01T10:00:00.000Z', 'git worktree add .claude/worktrees/old'),
+    bashLine('/repo', '2026-11-01T11:00:00.000Z', 'git worktree add .claude/worktrees/new'),
+    bashLine(OLD.path, '2026-11-10T10:00:00.000Z', 'ls'),
+    bashLine('/repo', '2026-11-20T09:00:00.000Z', `git -C ${NEW.path} status`),
+  ].join('\n')
+  w.mtimes[`${OLD.path}/.git`] = Date.parse('2026-11-01T10:00:00.000Z')
+  w.mtimes[`${NEW.path}/.git`] = Date.parse('2026-11-01T11:00:00.000Z')
+  await start($)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'refresh' })
+  const shown = async () => (await ui.findAll({ type: 'Text' })).map(one => one.text)
+  const found = await shown()
+  expect(found).toContain('THIS SESSION  1 worktree')
+  expect(found.some(one => one.startsWith('⎇ new'))).toBe(true)
+  expect(found).toContain('EARLIER IN THIS SESSION  1 worktree not used in the last day')
+  expect(found.find(one => one.startsWith('  ⎇ old'))).toMatch(/^  ⎇ old  old  PR .+ 10 d$/)
+  expect(found.some(one => one.startsWith('⎇ old'))).toBe(false)
+
+  await ui.press({ key: `earlier:history:${OLD.path}` })
+  expect((await shown()).some(one => one.startsWith('⎇ old'))).toBe(true)
+  await ui.press({ key: `earlier:history:${OLD.path}` })
+  expect((await shown()).some(one => one.startsWith('⎇ old'))).toBe(false)
+  await ui.unmount()
+
+  w.files['/t/s.jsonl'] += `\n${bashLine('/repo', '2026-11-20T09:30:00.000Z', `cat ${OLD.path}/README.md`)}\n`
+  const later = await texts($)
+  expect(later).toContain('THIS SESSION  2 worktrees')
+  expect(later.some(one => one.startsWith('EARLIER IN THIS SESSION'))).toBe(false)
+})
+
+test('the worktree the session is in stays in THIS SESSION however long ago it was used', async ($, on) => {
+  const OLD = { path: '/repo/.claude/worktrees/old', branch: 'old' }
+  const w = world(on, { '/repo': [MAIN, OLD] }, OLD.path)
+  w.now = Date.parse('2026-11-20T10:00:00.000Z')
+  w.files['/t/s.jsonl'] = bashLine('/repo', '2026-11-01T10:00:00.000Z', 'git worktree add .claude/worktrees/old')
+  w.mtimes[`${OLD.path}/.git`] = Date.parse('2026-11-01T10:00:00.000Z')
+  await start($, OLD.path)
+
+  const found = await texts($)
+  expect(found).toContain('THIS SESSION  1 worktree')
+  expect(found.some(one => one.startsWith('EARLIER IN THIS SESSION'))).toBe(false)
 })

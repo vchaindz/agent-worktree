@@ -359,3 +359,33 @@ export const branchesIn = (lines: Kept[], home: string): Made[] =>
       .flatMap(branchesMade)
       .map(made => ({ dir: resolvePath(cwd, made.dir ?? '.', home), branch: made.branch, at }))
   })
+
+// a path named in a text, not as the start of a longer name
+export const isNamed = (text: string, path: string) => {
+  for (let i = text.indexOf(path); i >= 0; i = text.indexOf(path, i + 1))
+    if (!/[\w.-]/.test(text[i + path.length] ?? '')) return true
+
+  return false
+}
+
+// the last time a tool call on these lines ran inside each path or named it in its input
+export const usesIn = (lines: string[], paths: string[], uses: Record<string, number> = {}) => {
+  for (const text of lines) {
+    if (!text.includes('"type":"tool_use"')) continue
+    const cwd = /"cwd":"([^"]*)"/.exec(text.slice(0, 4096))?.[1] ?? ''
+    const inside = paths.filter(path => isInside(cwd, path))
+    const named = paths.filter(path => !inside.includes(path) && isNamed(text, path))
+    if (inside.length === 0 && named.length === 0) continue
+    const line = jsonOf<Line>(text)
+    const at = timeOf(line?.timestamp)
+    if (at === undefined) continue
+    const content = line?.message?.content
+    const inputs = Array.isArray(content)
+      ? (content as Block[]).filter(block => block.type === 'tool_use').map(block => JSON.stringify(block.input ?? {}))
+      : []
+    for (const path of [...inside, ...named.filter(path => inputs.some(input => isNamed(input, path)))])
+      uses[path] = Math.max(uses[path] ?? 0, at)
+  }
+
+  return uses
+}
