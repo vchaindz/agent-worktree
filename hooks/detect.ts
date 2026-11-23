@@ -360,10 +360,13 @@ export const branchesIn = (lines: Kept[], home: string): Made[] =>
       .map(made => ({ dir: resolvePath(cwd, made.dir ?? '.', home), branch: made.branch, at }))
   })
 
-// a path named in a text, not as the start of a longer name
+// a path named in a text, not as part of a longer path; a JSON escape such as \n can stand before it
 export const isNamed = (text: string, path: string) => {
-  for (let i = text.indexOf(path); i >= 0; i = text.indexOf(path, i + 1))
-    if (!/[\w.-]/.test(text[i + path.length] ?? '')) return true
+  for (let i = text.indexOf(path); i >= 0; i = text.indexOf(path, i + 1)) {
+    const before = text.slice(Math.max(0, i - 2), i)
+    const isStart = !/[\w./-]$/.test(before) || /\\[nrt]$/.test(before)
+    if (isStart && !/[\w.-]/.test(text[i + path.length] ?? '')) return true
+  }
 
   return false
 }
@@ -372,19 +375,16 @@ export const isNamed = (text: string, path: string) => {
 export const usesIn = (lines: string[], paths: string[], uses: Record<string, number> = {}) => {
   for (const text of lines) {
     if (!text.includes('"type":"tool_use"')) continue
-    const cwd = /"cwd":"([^"]*)"/.exec(text.slice(0, 4096))?.[1] ?? ''
-    const inside = paths.filter(path => isInside(cwd, path))
-    const named = paths.filter(path => !inside.includes(path) && isNamed(text, path))
-    if (inside.length === 0 && named.length === 0) continue
     const line = jsonOf<Line>(text)
     const at = timeOf(line?.timestamp)
-    if (at === undefined) continue
     const content = line?.message?.content
-    const inputs = Array.isArray(content)
-      ? (content as Block[]).filter(block => block.type === 'tool_use').map(block => JSON.stringify(block.input ?? {}))
-      : []
-    for (const path of [...inside, ...named.filter(path => inputs.some(input => isNamed(input, path)))])
-      uses[path] = Math.max(uses[path] ?? 0, at)
+    if (at === undefined || !Array.isArray(content)) continue
+    const inputs = (content as Block[])
+      .filter(block => block.type === 'tool_use')
+      .map(block => JSON.stringify(block.input ?? {}))
+    for (const path of paths)
+      if (isInside(line?.cwd ?? '', path) || inputs.some(input => isNamed(input, path)))
+        uses[path] = Math.max(uses[path] ?? 0, at)
   }
 
   return uses
