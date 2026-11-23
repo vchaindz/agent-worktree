@@ -404,9 +404,15 @@ async function refreshNow($: EngineInterface, isFull: boolean) {
   const ownPaths = live.filter(one => !gone.includes(one)).map(one => one.path)
   const livePaths = live.map(one => one.path)
   const used = await lastUses($, livePaths).catch(() => ({}) as Record<string, number>)
-  // the worktree the session is in counts as worked in now
+  const previous = await read($, grove)
+  const running = agents.filter(agent => ACTIVE.includes(agent.status)).map(agent => deepest(agent.cwd, livePaths))
+  // the worktree the session is in, or one its agent runs in, counts as worked in now, and keeps that time after
   const usedAt = Object.fromEntries(
-    livePaths.map(path => [path, isInside(sessionDir, path) ? now : (used[path] ?? 0)] as const),
+    livePaths.map(path => {
+      const isNow = isInside(sessionDir, path) || running.includes(path)
+
+      return [path, isNow ? now : Math.max(used[path] ?? 0, previous.usedAt[path] ?? 0)] as const
+    }),
   )
   const badgePaths = [...new Set([...paths, ...livePaths])]
   const badges: Record<string, AgentBadge> = {}
@@ -421,7 +427,6 @@ async function refreshNow($: EngineInterface, isFull: boolean) {
       badges[one.path] = badgeOf(owner, agents)
   }
 
-  const previous = await read($, grove)
   const base = (path: string) => bases[repoOf[path] ?? '']
   const branches = Object.fromEntries(
     ownPaths.map(path => {
