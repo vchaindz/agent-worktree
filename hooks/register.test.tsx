@@ -1675,3 +1675,20 @@ test('the worktree the session is in stays in THIS SESSION however long ago it w
   expect(found).toContain('THIS SESSION  1 worktree')
   expect(found.some(one => one.startsWith('EARLIER IN THIS SESSION'))).toBe(false)
 })
+
+test('a worktree an agent worked in stays in THIS SESSION for a day after the agent ends', async ($, on) => {
+  const OLD = { path: '/repo/.claude/worktrees/old', branch: 'old' }
+  const w = world(on, { '/repo': [MAIN, OLD] })
+  w.now = Date.parse('2026-11-20T10:00:00.000Z')
+  w.files['/t/s.jsonl'] = bashLine('/repo', '2026-11-01T10:00:00.000Z', 'git worktree add .claude/worktrees/old')
+  w.mtimes[`${OLD.path}/.git`] = Date.parse('2026-11-01T10:00:00.000Z')
+  w.agents = [agentRow('ag1', 'fix old', OLD.path)]
+  await start($)
+  expect(await texts($)).toContain('THIS SESSION  1 worktree')
+
+  w.agents = []
+  w.now += 23 * 3_600_000
+  expect(await texts($)).toContain('THIS SESSION  1 worktree')
+  w.now += 2 * 3_600_000
+  expect(await texts($)).toContain('EARLIER IN THIS SESSION  1 worktree not used in the last day')
+})

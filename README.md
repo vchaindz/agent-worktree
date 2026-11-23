@@ -80,9 +80,10 @@ bar, last commit and sparkline, and shortens its buttons.
 - **Earlier in this session**: this session's worktrees it has not made or
   worked in for a day, one row each: the branch, its newest PR and the days
   since the session last worked there. A tool call counts as work in a worktree
-  when it runs inside it or names its folder in its input; the worktree the
-  session is in, and one its agent runs in, stay above. Press a row to open its
-  card under it.
+  when it runs inside it or names its folder in its input, and so does an agent
+  of the session running in it, read every 5 seconds while it runs; the
+  worktree the session is in stays above. Press a row to open its card under
+  it.
 - **Problems in this session**: one line per failed worktree call (a refused
   `EnterWorktree`, a `git worktree add` that failed), the last five.
 - **Other worktrees**: the rest of the worktrees of the same repositories,

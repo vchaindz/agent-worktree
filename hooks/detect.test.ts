@@ -272,10 +272,18 @@ test('a tool call is work in a worktree when it runs inside it or names it in it
     line('/r', '2026-11-02T10:00:00.000Z', [bash(`git -C ${B} status`)]),
     line('/r', '2026-11-03T10:00:00.000Z', [{ type: 'tool_result', content: `${A} [main]` }]),
     line('/r', '2026-11-04T10:00:00.000Z', [{ type: 'text', text: `see ${A}` }, bash('ls')]),
+    JSON.stringify({
+      type: 'assistant',
+      timestamp: '2026-11-05T10:00:00.000Z',
+      message: { content: [bash(`echo ${'x'.repeat(5000)}`)] },
+      cwd: `${B}/src`,
+    }),
+    line('/r', '2026-11-07T10:00:00.000Z', [bash(`cd /tmp\n${A}/run.sh`)]),
+    line('/r', '2026-11-08T10:00:00.000Z', [bash(`ls /backup${A}`)]),
   ]
 
   expect(usesIn(lines, [A, B])).toEqual({
-    [A]: Date.parse('2026-11-01T10:00:00.000Z'),
-    [B]: Date.parse('2026-11-02T10:00:00.000Z'),
+    [A]: Date.parse('2026-11-07T10:00:00.000Z'),
+    [B]: Date.parse('2026-11-05T10:00:00.000Z'),
   })
 })
