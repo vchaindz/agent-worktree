@@ -59,7 +59,7 @@ const prompts = (path: string, branch: string, base?: string) => {
   return {
     Investigate: `Investigate the git worktree at ${path} (branch ${branch}): summarize what was done there, how it stands against ${against}, and any uncommitted work. ${READ_ONLY}`,
     'Review diff': `Review the changes on branch ${branch} against ${against}${diff} in the worktree at ${path} for correctness bugs. ${READ_ONLY}`,
-    'Cleanup check': `Check whether the worktree at ${path} (branch ${branch}) is safe to remove: is it merged into ${against}, does it hold uncommitted files, is an agent still working in it? Report only, change nothing. ${READ_ONLY}`,
+    'Cleanup check': `Check whether the worktree at ${path} (branch ${branch}) is safe to remove: is it merged into ${against}, does it hold uncommitted files, does it hold commits that are on no remote (git rev-list HEAD --not --remotes), is an agent still working in it? Report only, change nothing. ${READ_ONLY}`,
   }
 }
 

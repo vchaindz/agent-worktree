@@ -1520,6 +1520,7 @@ test('pressing an other worktree’s row opens a tile with a card’s details; p
   expect(await shown()).toContain('  ?? notes.md (uncommitted)')
   await ui.press({ key: `${O.path}:Cleanup check` })
   expect(w.sent[0]).toContain(`worktree at ${O.path} (branch feat-review) is safe to remove: is it merged into main`)
+  expect(w.sent[0]).toContain('does it hold commits that are on no remote')
   expect(w.sent[0]).toContain('Read-only: do not modify, switch into, merge or remove the worktree.')
 
   await ui.press({ key: `other:${O.path}` })
